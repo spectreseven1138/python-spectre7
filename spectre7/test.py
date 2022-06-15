@@ -26,5 +26,7 @@ class Player(MprisPlayerInterface):
         return ret
 
 server = MprisServer("bruh")
-server.setPlayerInterface(Player())
+# server.setPlayerInterface(Player())
 server.publish()
+
+MprisServer.LOOP.run()

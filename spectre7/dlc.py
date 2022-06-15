@@ -2,7 +2,7 @@
 # Downloads the copied URL to ~/Downloads/YTD using ytd
 
 import pyperclip
-import ytd
+from spectre7 import ytd
 
 def main():
     url = pyperclip.paste()

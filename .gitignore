@@ -1,2 +1,3 @@
 dist/
 *.egg-info/
+spectre7/__pycache__/

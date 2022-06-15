@@ -8,7 +8,7 @@ class MprisInterface:
     INTERFACE = None
     PropertiesChanged = signal()
 
-    def propertyChanged(self, properties: dict[str, any] | list[str] | str):
+    def notifyPropertyChanged(self, properties: dict[str, any] | list[str] | str):
 
         if isinstance(properties, list):
             properties = {property: getattr(self, property) for property in properties}
@@ -185,16 +185,25 @@ class MprisPlayerInterface(MprisInterface):
         for key in list(metadata.keys()):
             value = metadata[key]
 
-            if value is None:
-                metadata.pop(key)
-            elif isinstance(value, str):
-                metadata[key] = Variant("o" if key == "mpris:trackid" else "s", value)
-            elif isinstance(value, int) or isinstance(value, float):
-                metadata[key] = Variant("x" if key == "mpris:length" else "i", int(value))
-            elif isinstance(value, list):
-                metadata[key] = Variant("as", value)
-            else:
-                raise TypeError(value, value.__class__)
+            try:
+                if value is None:
+                    metadata.pop(key)
+                elif isinstance(value, str):
+                    metadata[key] = Variant("o" if key == "mpris:trackid" else "s", value)
+                elif isinstance(value, int) or isinstance(value, float):
+                    metadata[key] = Variant("x" if key == "mpris:length" else "i", int(value))
+                elif isinstance(value, list):
+                    for i in range(len(value)):
+                        value[i] = str(value[i])
+                    metadata[key] = Variant("as", value)
+                else:
+                    raise TypeError(value, value.__class__)
+
+            except Exception as e:
+                import notify2
+                notify2.init("bruh")
+                notify2.Notification(str(e)).show()
+
 
     @property
     def Metadata(self) -> dict:
@@ -333,15 +342,14 @@ class MprisTrackInterface(MprisInterface):
 class MprisServer():
     
     LOOP = GLib.MainLoop()
+    token = None
 
     def __init__(self, name: str):
         self.name = name
         self.token = None
 
         self.main_interface = MprisMainInterface()
-        self.player_interface = None
-
-        # TODO
+        self.player_interface = MprisPlayerInterface()
         self.track_interface = None
 
     @staticmethod
@@ -366,10 +374,7 @@ class MprisServer():
         bus = DBusConnect("unix:path=/run/user/1000/bus")
 
         interface = "/" + MprisMainInterface.INTERFACE.replace(".", "/")
-        args = [MprisMainInterface.INTERFACE + "." + self.name, (interface, self.main_interface)]
-
-        if self.player_interface:
-            args.append((interface, self.player_interface))
+        args = [MprisMainInterface.INTERFACE + "." + self.name, (interface, self.main_interface), (interface, self.player_interface)]
 
         if self.track_interface:
             self.main_interface.HasTrackList = True 
