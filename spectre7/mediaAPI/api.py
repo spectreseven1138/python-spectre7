@@ -1,7 +1,3 @@
-#!/usr/bin/python3
-
-from zmq import Context, REQ, REP
-from threading import Thread
 from os import system
 from typing import Callable
 from pydbus import SessionBus
@@ -12,20 +8,22 @@ import json
 from spectre7 import utils
 import fnmatch
 
-"""
-
-Arguments:
-
-0: Mode [server (default), client, port, config_path]
-
-Flags:
--s: Start MediaAPI on startup if in server mode
-
-
-"""
-
-APP_NAME = "MediaAPI"
-REMOTE_PORT = 3000
+def removeBrackets(text: str, brackets: str):
+    count = [0] * (len(brackets) // 2) # count open/close brackets
+    saved_chars = []
+    for character in text:
+        for i, b in enumerate(brackets):
+            if character == b: # found bracket
+                kind, is_close = divmod(i, 2)
+                count[kind] += (-1)**is_close # `+1`: open, `-1`: close
+                if count[kind] < 0: # unbalanced bracket
+                    count[kind] = 0  # keep it
+                else:  # found bracket to remove
+                    break
+        else: # character is not a [balanced] bracket
+            if not any(count): # outside brackets
+                saved_chars.append(character)
+    return ''.join(saved_chars)
 
 class Source:
     pass
@@ -405,34 +403,23 @@ class Source:
         return False
 
     def getReadableTitle(self, api: MediaAPI) -> str:
-        ret: str = self.metadata["title"]
+        ret = self.metadata["title"].replace("  ", " ")
         
         if ("title_replacements" in api._config and ret in api._config["title_replacements"]):
-            return api._config["title_replacements"][ret].strip()
+            ret = api._config["title_replacements"][ret]
+        else:
+            if ("remove_brackets" in api._config):
+                ret = removeBrackets(ret, api._config["remove_brackets"])
 
-        if ("remove_brackets" in api._config):
-            for pair in api._config["remove_brackets"]:
-                finished = False
-                while (not finished):
-                    a = ret.find(pair[0])
-                    if (a < 0):
-                        finished = True
-                        break
-
-                    b = ret.find(pair[1])
-                    if (b < 0):
-                        finished = True
-                        break
-
-                    temp = ret
-                    ret = temp.slice(0, a - 1) + temp.slice(b + len(pair[1]), len(temp))
-
-        if ("substring_replacements" in api._config):
-            for key in api._config["substring_replacements"]:
-                ret = ret.replace(key, api._config["substring_replacements"][key])
+            if ("substring_replacements" in api._config):
+                for key in api._config["substring_replacements"]:
+                    ret = ret.replace(key, api._config["substring_replacements"][key])
 
         if (self.metadata["artist"] is not None and len(self.metadata["artist"]) > 0):
-            ret = self.metadata["artist"][0] + " | " + ret
+            artist = self.metadata["artist"][0].strip()
+            if "artist_replacements" in api._config and artist in api._config["artist_replacements"]:
+                artist = api._config["artist_replacements"][artist]
+            ret = artist + "  |  " + ret
 
         return ret.strip()
 
@@ -452,274 +439,3 @@ class Source:
             return None
 
         return source
-
-class Server:
-
-    UPDATE_INTERVAL = 2
-
-    api: MediaAPI = None
-    thread: Thread = None
-
-    visible: bool = False
-    can_go_next: bool = False
-    can_go_previous: bool = False
-    title: str = ""
-    volume: int = 0
-    muted: bool = False
-    playing: bool = False
-
-    def listen(self, silent: bool = False):
-
-        context = Context()
-        socket = context.socket(REP)
-
-        try:
-            socket.bind(f"tcp://127.0.0.1:{REMOTE_PORT}")
-        except Exception as e:
-            if self.api:
-                self.stop()
-            raise e
-
-        utils.log(f"Running in remote server mode at 127.0.0.1:{REMOTE_PORT}")
-
-        try:
-            
-            while True:
-                inp = socket.recv().decode("utf8").lower().strip()
-                response = ""
-                
-                if inp in self.COMMANDS:
-                    # utils.log(f"Command called: {inp}")
-                    response = self.COMMANDS[inp](self, silent)
-                elif inp == "help":
-                    msg = "Available commands:"
-                    for command in self.COMMANDS:
-                        msg += f" - {command}\n"
-                    response = msg.rstrip()
-                elif inp != "":
-                    response = utils.format_colour("red", f"'{inp}' is not a valid command")
-                
-                socket.send_string(response)
-
-        except KeyboardInterrupt:
-            print("")
-
-        context.destroy()
-
-    def updateThread(self):
-        while self.api:
-            self.api.update()
-            time.sleep(self.UPDATE_INTERVAL)
-
-    def setVisibleCallback(self, visible: bool):
-        self.visible = visible
-    def setCanGoNextCallback(self, can_go: bool):
-        self.can_go_next = can_go
-    def setCanGoPreviousCallback(self, can_go: bool):
-        self.can_go_previous = can_go
-    def setTitleCallback(self, title: str):
-        self.title = title
-    def setVolumeCallback(self, volume: int, muted: bool):
-        self.volume = volume
-        self.muted = muted
-    def setPlayingCallback(self, playing: bool):
-        self.playing = playing;
-    
-    # Start MediaAPI if not running
-    def start(self, silent: bool = False) -> str:
-        if self.api:
-            msg = f"{APP_NAME} is already running"
-            if silent:
-                utils.log(msg)
-            return msg
-
-        self.api = MediaAPI()
-
-        self.api.setVisibleCallback = self.setVisibleCallback
-        self.api.setCanGoNextCallback = self.setCanGoNextCallback
-        self.api.setCanGoPreviousCallback = self.setCanGoPreviousCallback
-        self.api.setTitleCallback = self.setTitleCallback
-        # TODO
-        # self.api.setVolumeCallback = self.setVolumeCallback
-        self.api.setPlayingCallback = self.setPlayingCallback
-
-        self.thread = Thread(target=self.updateThread)
-        self.thread.start()
-
-        msg = f"{APP_NAME} has been started"
-        if not silent:
-            utils.log(msg)
-        return msg
-
-    # Stop MediaAPI if running
-    def stop(self, silent: bool = False) -> str:
-        if self.api is None:
-            msg = f"{APP_NAME} is not running"
-            if not silent:
-                utils.log(msg)
-            return msg
-        
-        self.api = None
-        self.thread.join()
-
-        msg = f"{APP_NAME} stopped"
-        if not silent:
-            utils.log(msg)
-        return msg
-
-    # Restart MediaAPI (starts if not running)
-    def restart(self, silent: bool = False) -> str:
-        if self.api:
-            self.stopAPI(silent)
-        return self.startAPI(silent)
-
-    def getInfo(self, silent: bool = False) -> str:
-        info = {property: getattr(self, property) for property in ("visible", "can_go_next", "can_go_previous", "title", "volume", "muted", "playing")}
-        info["metadata"] = self.api.current_source.metadata if self.api.current_source is not None else None
-        msg = json.dumps(info)
-        if not silent:
-            print(msg)
-        return msg
-
-    def reloadConfig(self, silent: bool = False) -> str:
-        if not self.api:
-            msg = f"{APP_NAME} is not running"
-            if not silent:
-                utils.err(msg)
-            return msg
-        
-        msg = ""
-
-        def calllback(_msg: str):
-            nonlocal msg
-            msg = _msg
-
-        self.api.loadConfig(calllback)
-        
-        if not silent:
-            utils.log(msg)
-        
-        return msg
-
-    def playPause(self, silent: bool = False) -> str:
-        if not self.api:
-            msg = f"{APP_NAME} is not running"
-            if not silent:
-                utils.err(msg)
-            return msg
-        
-        self.api.mediaPlayPause()
-        
-        return ""
-    
-    def next(self, silent: bool = False) -> str:
-        if not self.api:
-            msg = f"{APP_NAME} is not running"
-            if not silent:
-                utils.err(msg)
-            return msg
-        
-        self.api.mediaForward()
-        
-        return ""
-
-    def previous(self, silent: bool = False) -> str:
-        if not self.api:
-            msg = f"{APP_NAME} is not running"
-            if not silent:
-                utils.err(msg)
-            return msg
-        
-        self.api.mediaBackward()
-        
-        return ""
-
-    COMMANDS = {method.__name__.lower(): method for method in (start, stop, restart, getInfo, reloadConfig, playPause, next, previous)}
-
-class Client:
-
-    def __init__(self):
-        self.context = Context()
-        self.socket = self.context.socket(REQ)
-        self.socket.connect(f"tcp://127.0.0.1:{REMOTE_PORT}")
-
-    def __delete__(self):
-        self.context.destroy()
-    
-    def call(self, command: str, silent: bool) -> str:
-        command = command.lower()
-
-        if not command in Server.COMMANDS:
-            if silent:
-                raise RuntimeError
-            else:
-                utils.err(f"'{command}' is not a valid command", on_err=None)
-            return
-        
-        self.socket.send_string(command)
-        response = self.socket.recv().decode()
-        if not silent and len(response) > 0:
-            print(response)
-        return response
-
-    def runInteractive(self):
-        try:
-            while True:
-                inp = input(" : ").lower().strip()
-                if inp == "clear" or inp == "c":
-                    system("clear")
-                elif inp in Server.COMMANDS:
-                    self.call(inp, False)
-                elif inp == "help":
-                    msg = "\nAvailable commands:"
-                    for command in Server.COMMANDS:
-                        msg += f" - {command}\n"
-                    print(msg.strip())
-                elif inp != "":
-                    utils.err(f"'{inp}' is not a valid command", on_err=None)
-        except KeyboardInterrupt:
-            print("")
-
-def main():
-    import sys
-
-    args = sys.argv[1:]
-    mode = "server"
-    autostart = False
-
-    if len(args) > 0:
-        mode = args.pop(0).lower().strip()
-
-        i = 0
-        while i < len(args):
-            arg = args[i]
-            if arg == "-s":
-                autostart = True
-                args.pop(i)
-                i -= 1
-            i += 1
-
-    if mode == "server":
-        server = Server()
-        if autostart:
-            server.start()
-        server.listen(True)
-    elif mode == "client":
-        client = Client()
-
-        if len(args) > 0:
-            if args[0].lower() in Server.COMMANDS:
-                client.call(args[0], False)
-            else:
-                utils.err(f"'{args[0]}' is not a valid command")
-            return
-        client.runInteractive()
-    elif mode == "port":
-        print(REMOTE_PORT)
-    elif mode == "config_path":
-        print(MediaAPI.getConfigPath())
-    else:
-        utils.err(f"Unknown mode '{mode}'\nAvailable modes:\n - server (default)\n - client\n - port\n - config_path")
-
-if __name__ == "__main__":
-    main()

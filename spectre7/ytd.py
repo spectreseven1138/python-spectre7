@@ -5,7 +5,6 @@ import os
 import pyperclip
 from pyyoutube import Api as PyyApi
 import shutil
-from subprocess import Popen
 import urllib.request
 import json
 
@@ -96,7 +95,7 @@ def mode_album(url: str):
         exit()
 
     album_data = None
-    while utils.input_yesno("Paste album data?"):
+    while utils.input_yesno("Paste album data?") == "y":
         try:
             album_data = json.loads(pyperclip.paste())
             break
@@ -115,7 +114,7 @@ def mode_album(url: str):
             "suffix": {"type": str, "name": "Suffix to trim"}
         })
 
-        if utils.input_yesno("Copy album data?"):
+        if utils.input_yesno("Copy album data?") == "y":
             pyperclip.copy(json.dumps(album_data))
 
     dir = download_directory + get_playlist_title(url)
@@ -135,16 +134,18 @@ def mode_album(url: str):
         album_data["cover_path"] = dir + "/thumbnail.jpg"
     # Copy existing local file
     elif os.path.isfile(album_data["cover_path"]):
-        shutil.copyfile(album_data["cover_path"], dir + "/thumbnail" + os.path.splitext(album_data["cover_path"]))
-        dir + "/thumbnail" + os.path.splitext(album_data["cover_path"])
+        ext = os.path.splitext(album_data["cover_path"])[1]
+        shutil.copyfile(album_data["cover_path"], dir + "/thumbnail" + ext)
+        album_data["cover_path"] = dir + "/thumbnail" + ext
     # Download from URL
     else:
-        urllib.request.urlretrieve(album_data["cover_path"], dir + "/thumbnail" + os.path.splitext(album_data["cover_path"]))
-        album_data["cover_path"] = dir + "/thumbnail" + os.path.splitext(album_data["cover_path"])
+        ext = os.path.splitext(album_data["cover_path"])[1]
+        urllib.request.urlretrieve(album_data["cover_path"], dir + "/thumbnail" + ext)
+        album_data["cover_path"] = dir + "/thumbnail" + ext
 
     # processed_files = ["thumbnail.jpg"]
     for i, video_id in enumerate(playlist_videos):
-        execute_dl_command(video_id, "--no-playlist --extract-audio --audio-quality 0 --audio-format mp3", dir)
+        execute_dl_command(video_id, "--no-playlist --extract-audio --audio-quality 0 --audio-format mp3 -f bestaudio", dir)
         # print("Sleep start")
         # time.sleep(2)
         # print("Sleep end")

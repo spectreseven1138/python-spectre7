@@ -59,28 +59,27 @@ def absoluteImport(absolute_path: str):
     print("IMPORT: ", absolute_path)
     return SourceFileLoader("", absolute_path).load_module()
 
-# Values must be a dict, where keys are value names and values are types
+# Values must be a dict, where keys are value names and values are dicts with the format {"type": type, "name": str}
 def input_values(values: dict, format_names: bool = True, allow_empty: bool = False) -> dict:
     ret = {}
 
     for key in values:
 
-        name = key
-        if format_names:
-            name = key.replace("_", " ").capitalize()
+        name = values[key]["name"]
+        type = values[key]["type"]
 
         while True:
-            result = input(format_global_colour(f"Input value for {name} (", "green") + format_colour("yellow", values[key].__name__) + format_global_colour("): ", "green"))
+            result = input(format_global_colour(f"Input value for {name} (", "green") + format_colour("yellow", type.__name__) + format_global_colour("): ", "green"))
 
             if not allow_empty and values[key] == str and result.strip() == "":
                 err("Input must not be empty\n")
                 continue
 
             try:
-                ret[key] = values[key](result)
+                ret[key] = type(result)
                 break
-            except:
-                err("Invalid type\n")
+            except Exception as e:
+                err(f"Invalid type\n{e}")
     return ret
 
 def input_yesno(prompt: str, options: tuple = ("y", "n")) -> str:
@@ -200,6 +199,7 @@ def recursiveGlob(path: str, extension: str, name: str = None, exclude_dirs: lis
     return matches
 
 def ensureDirExists(path: str):
+    path = os.path.expanduser(path)
     if os.path.isfile(path):
         raise FileExistsError
     if os.path.isdir(path):
