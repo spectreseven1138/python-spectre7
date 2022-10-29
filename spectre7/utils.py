@@ -16,6 +16,8 @@ on_err = None
 global_colour = ""
 default_input_timeout = 5
 
+out = sys.stdout
+
 COLOURS = termcolour.COLORS
 
 def set_colour(value: str):
@@ -59,27 +61,28 @@ def absoluteImport(absolute_path: str):
     print("IMPORT: ", absolute_path)
     return SourceFileLoader("", absolute_path).load_module()
 
-# Values must be a dict, where keys are value names and values are dicts with the format {"type": type, "name": str}
+# Values must be a dict, where keys are value names and values are types
 def input_values(values: dict, format_names: bool = True, allow_empty: bool = False) -> dict:
     ret = {}
 
     for key in values:
 
-        name = values[key]["name"]
-        type = values[key]["type"]
+        name = key
+        if format_names:
+            name = key.replace("_", " ").capitalize()
 
         while True:
-            result = input(format_global_colour(f"Input value for {name} (", "green") + format_colour("yellow", type.__name__) + format_global_colour("): ", "green"))
+            result = input(format_global_colour(f"Input value for {name} (", "green") + format_colour("yellow", values[key].__name__) + format_global_colour("): ", "green"))
 
             if not allow_empty and values[key] == str and result.strip() == "":
                 err("Input must not be empty\n")
                 continue
 
             try:
-                ret[key] = type(result)
+                ret[key] = values[key](result)
                 break
-            except Exception as e:
-                err(f"Invalid type\n{e}")
+            except:
+                err("Invalid type\n")
     return ret
 
 def input_yesno(prompt: str, options: tuple = ("y", "n")) -> str:
@@ -144,6 +147,11 @@ def log(msg):
         return
     printc("cyan", str(msg))
 
+def info(msg):
+    if not logging_enabled:
+        return
+    printc("magenta", str(msg))
+
 def warn(msg):
     printc("yellow", combine_strings_with_newline("WARNING: ", str(msg)))
 
@@ -153,7 +161,8 @@ def err(msg):
         on_err()
 
 def printc(colour: str, *messages):
-    print(*(format_colour(colour, msg) for msg in messages))
+    out.write("".join(format_colour(colour, msg) for msg in messages) + "\n")
+    out.flush()
 
 def format_colour(colour: str, message, attrs: list = []):
     if colour == "" or colour == "default":
@@ -171,7 +180,7 @@ def recursiveGlob(path: str, extension: str, name: str = None, exclude_dirs: lis
         match = name
     else:
         match = "*"
-    
+
     if extension is not None:
         match += "." + extension
     else:
@@ -179,10 +188,10 @@ def recursiveGlob(path: str, extension: str, name: str = None, exclude_dirs: lis
 
     matches = []
     for root, dirnames, filenames in os.walk(path):
-        
+
         if root.startswith(".") or "/." in root:
             continue
-         
+
         excluded = False
         for dir in exclude_dirs:
             if root.startswith(os.path.join(os.getcwd(), dir).removesuffix("/")):
@@ -190,7 +199,7 @@ def recursiveGlob(path: str, extension: str, name: str = None, exclude_dirs: lis
                 break
         if excluded:
             continue
-            
+
         for filename in fnmatch.filter(filenames, match):
             if filename.startswith("."):
                 continue
@@ -199,9 +208,11 @@ def recursiveGlob(path: str, extension: str, name: str = None, exclude_dirs: lis
     return matches
 
 def ensureDirExists(path: str):
-    path = os.path.expanduser(path)
     if os.path.isfile(path):
         raise FileExistsError
     if os.path.isdir(path):
         return
     os.makedirs(path)
+
+def clear():
+    os.system("clear")
